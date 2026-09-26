@@ -14,8 +14,11 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 10000;
 const PASSWORD = process.env.PANEL_PASSWORD;
 const BDIR = path.join(__dirname, "bot"); // এখানেই আপলোড করা official-bot প্রজেক্ট এক্সট্র্যাক্ট হবে
-const EDITABLE_SUBDIRS = ["commands", "utils"]; // বটের ভেতরে শুধু এই ফোল্ডারগুলো এডিট/ডিলিটযোগ্য
-const ROOT_EDITABLE_FILES = [".env", "package.json"]; // বটের রুটে শুধু এই ফাইলগুলো এডিটযোগ্য
+// ✅ আগে শুধু commands/ ও utils/ ফোল্ডার চেনা যেত, তাই zip-এ অন্য কোনো
+// ফোল্ডার/ফাইল থাকলে প্যানেলে দেখাতো না। এখন bot/ এর ভেতরের সবকিছু
+// (নিচের এক্সক্লুড-লিস্ট বাদে) স্বয়ংক্রিয়ভাবে ফাইল ম্যানেজারে আসবে।
+const EXCLUDED_DIRS = new Set(["node_modules", ".git", "tmp"]);
+const EXCLUDED_FILES = new Set([]); // .env বাদ দেওয়া হয় না এখান থেকে — সেটা শুধু Mongo-সিঙ্ক থেকে বাদ (নিচে দেখুন)
 
 fs.ensureDirSync(BDIR);
 
@@ -134,26 +137,37 @@ function auth(req, res, next) {
   next();
 }
 
-// জিপ আপলোডের পর commands/utils/package.json — সবকিছু MongoDB-তে সিঙ্ক
-// করা (.env ইচ্ছা করেই বাদ — সিক্রেট key ডাটাবেজে না রাখাই ভালো অভ্যাস,
-// সেগুলো Render Environment Variables-এ রাখুন)
+// bot/ এর ভেতরে (EXCLUDED_DIRS বাদে) সব ফাইলের রিলেটিভ পাথ রিকার্সিভলি বের করা
+async function walkBotFiles(dir = BDIR, base = "") {
+  let out = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") && entry.name !== ".env") continue; // hidden ফাইল বাদ, .env ছাড়া
+    const rel = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      out = out.concat(await walkBotFiles(path.join(dir, entry.name), rel));
+    } else {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+// জিপ আপলোডের পর bot/-এর সবকিছু (node_modules/tmp/.git বাদে) MongoDB-তে
+// সিঙ্ক করা — .env ইচ্ছা করেই বাদ (সিক্রেট key ডাটাবেজে না রাখাই ভালো
+// অভ্যাস, সেগুলো Render Environment Variables-এ রাখুন)
 async function syncAllToMongo() {
   if (!mongoStore.isConnected()) return 0;
   let count = 0;
-  for (const dir of EDITABLE_SUBDIRS) {
-    const dirPath = path.join(BDIR, dir);
-    if (!(await fs.pathExists(dirPath))) continue;
-    for (const f of await fs.readdir(dirPath)) {
-      if (!f.endsWith(".js")) continue;
-      const content = await fs.readFile(path.join(dirPath, f), "utf8");
-      await mongoStore.saveFile(`${dir}/${f}`, content);
+  const files = await walkBotFiles();
+  for (const relPath of files) {
+    if (relPath === ".env") continue;
+    try {
+      const content = await fs.readFile(path.join(BDIR, relPath), "utf8");
+      await mongoStore.saveFile(relPath, content);
       count++;
-    }
-  }
-  const pkgPath = path.join(BDIR, "package.json");
-  if (await fs.pathExists(pkgPath)) {
-    await mongoStore.saveFile("package.json", await fs.readFile(pkgPath, "utf8"));
-    count++;
+    } catch (e) { /* বাইনারি/অপঠনযোগ্য ফাইল স্কিপ */ }
   }
   return count;
 }
@@ -214,34 +228,24 @@ app.get("/api/logs", auth, (req, res) => res.json({ lines: logLines }));
 
 // ──────────────────────────── ফাইল ম্যানেজার (bot/ এর ভেতরে) ────────────────────────────
 function safeResolve(relPath) {
-  const cleaned = String(relPath || "").replace(/^\/+/, "");
-  const top = cleaned.split("/")[0];
-  if (!EDITABLE_SUBDIRS.includes(top) && !ROOT_EDITABLE_FILES.includes(cleaned)) {
-    throw new Error("এই পাথ এডিট/ডিলিট করার অনুমতি নেই");
-  }
+  const cleaned = String(relPath || "").replace(/^\/+/, "").replace(/\.\./g, "");
+  if (!cleaned) throw new Error("পাথ খালি");
+  const topDir = cleaned.split("/")[0];
+  if (EXCLUDED_DIRS.has(topDir)) throw new Error("এই ফোল্ডার সুরক্ষিত, এডিট/ডিলিট করা যাবে না");
   const full = path.resolve(BDIR, cleaned);
-  if (!full.startsWith(path.resolve(BDIR))) throw new Error("অবৈধ পাথ");
+  if (!full.startsWith(path.resolve(BDIR) + path.sep) && full !== path.resolve(BDIR)) throw new Error("অবৈধ পাথ");
   return full;
 }
 
 app.get("/api/files", auth, async (req, res) => {
   try {
+    const files = await walkBotFiles();
     const result = [];
-    for (const f of ROOT_EDITABLE_FILES) {
-      const fp = path.join(BDIR, f);
-      if (await fs.pathExists(fp)) {
-        const st = await fs.stat(fp);
-        result.push({ path: f, size: st.size, mtime: st.mtimeMs });
-      }
-    }
-    for (const dir of EDITABLE_SUBDIRS) {
-      const dirPath = path.join(BDIR, dir);
-      if (!(await fs.pathExists(dirPath))) continue;
-      for (const f of await fs.readdir(dirPath)) {
-        if (!f.endsWith(".js")) continue;
-        const stat = await fs.stat(path.join(dirPath, f));
-        result.push({ path: `${dir}/${f}`, size: stat.size, mtime: stat.mtimeMs });
-      }
+    for (const relPath of files) {
+      try {
+        const st = await fs.stat(path.join(BDIR, relPath));
+        result.push({ path: relPath, size: st.size, mtime: st.mtimeMs });
+      } catch (e) { /* মাঝপথে ডিলিট হয়ে থাকলে স্কিপ */ }
     }
     res.json({ files: result });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -366,7 +370,8 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 
 /* ── টপ বার ── */
 .top{position:fixed;top:0;left:0;right:0;height:54px;background:rgba(13,13,24,.97);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 14px;z-index:200;gap:10px;padding-top:env(safe-area-inset-top,0px)}
-.top-logo{width:34px;height:34px;background:linear-gradient(135deg,var(--ac),#ff6584);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;box-shadow:0 0 20px rgba(108,99,255,.4)}
+.top-logo{width:34px;height:34px;background:linear-gradient(135deg,var(--ac),#ff6584);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;box-shadow:0 0 20px rgba(108,99,255,.4);animation:logoIdle 3.4s ease-in-out infinite}
+@keyframes logoIdle{0%,100%{box-shadow:0 0 16px rgba(108,99,255,.35)}50%{box-shadow:0 0 26px rgba(108,99,255,.6)}}
 .top-logo.live{animation:logoPulse 1.8s ease-in-out infinite}
 @keyframes logoPulse{0%,100%{box-shadow:0 0 20px rgba(108,99,255,.4),0 0 0 0 rgba(46,213,115,.5)}50%{box-shadow:0 0 28px rgba(108,99,255,.7),0 0 0 8px rgba(46,213,115,0)}}
 .top-name{font-size:15px;font-weight:800;color:#fff;flex:1}
@@ -384,9 +389,17 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 .tab::after{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:0;height:2px;background:var(--ac);border-radius:0 0 3px 3px;transition:.2s}
 .tab.active::after{width:36px}
 
-.main{padding:66px 12px 76px;min-height:100vh}
-.page{display:none}.page.active{display:block}
+.main{padding:66px 12px 76px;min-height:100vh;position:relative;z-index:1}
+.page{display:none;animation:pageIn .35s ease}
+.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 .pg-title{font-size:15px;font-weight:800;color:#fff;margin:4px 0 12px}
+
+/* ── অ্যাম্বিয়েন্ট ব্যাকগ্রাউন্ড (পুরো প্যানেল জুড়ে হালকা glow, jibonto feel) ── */
+.app-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.aorb{position:absolute;border-radius:50%;filter:blur(110px);opacity:.10;animation:fl 10s ease-in-out infinite}
+.a1{width:420px;height:420px;background:#6c63ff;top:-120px;right:-140px}
+.a2{width:320px;height:320px;background:#3ecf8e;bottom:60px;left:-120px;animation-delay:3s}
 
 /* ── গ্রিটিং কার্ড (লাইভ ক্লক) ── */
 .greet-card{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,rgba(108,99,255,.15),rgba(255,101,132,.1));border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:14px}
@@ -397,7 +410,8 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 
 /* ── স্ট্যাট কার্ড ── */
 .sg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-.sc{background:linear-gradient(135deg,var(--s2),var(--s3));border:1px solid var(--bd);border-radius:14px;padding:14px}
+.sc{background:linear-gradient(135deg,var(--s2),var(--s3));border:1px solid var(--bd);border-radius:14px;padding:14px;transition:.15s}
+.sc:active{transform:scale(.97);border-color:var(--ac)}
 .sc-i{font-size:22px;margin-bottom:6px}
 .sc-v{font-size:18px;font-weight:900;color:#fff}
 .sc-l{font-size:10px;color:var(--mu);margin-top:2px}
@@ -428,9 +442,14 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 /* ── ফাইল ম্যানেজার ── */
 .sinput{width:100%;padding:11px 14px;border-radius:11px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);font-size:13px;outline:none;margin-bottom:10px;transition:.2s}
 .sinput:focus{border-color:var(--ac)}
-.folder-head{display:flex;align-items:center;gap:8px;padding:2px 2px 9px;color:var(--mu);font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+.folder-head{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--tx);font-size:12.5px;font-weight:800;background:var(--s2);border:1px solid var(--bd);border-radius:12px;margin-bottom:0;cursor:pointer;transition:.15s;user-select:none}
+.folder-head:active{background:var(--s3)}
+.folder-head .chev{margin-left:auto;transition:transform .25s;color:var(--mu);font-size:11px}
+.folder-head.open .chev{transform:rotate(90deg)}
+.flist{transition:max-height .25s ease}
+.flist.collapsed{display:none}
 .folder-head .count{background:var(--bd);color:#c9d1d9;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;text-transform:none;letter-spacing:0}
-.flist{background:var(--s2);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin-bottom:16px}
+.flist{background:var(--s2);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin:8px 0 16px}
 .frow{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;transition:.12s}
 .frow:last-child{border-bottom:none}
 .frow:active{background:rgba(108,99,255,.08)}
@@ -446,7 +465,7 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 /* ── এডিটর ── */
 .ed-top{background:var(--s2);border:1px solid var(--bd);border-radius:12px 12px 0 0;padding:10px 12px;display:flex;align-items:center;gap:8px}
 .ed-fn{flex:1;font-size:12px;color:var(--ac);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#ced{width:100%;height:calc(100vh - 250px);background:#010108;border:1px solid var(--bd);border-top:none;border-radius:0 0 12px 12px;padding:14px;color:#e6edf3;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.7;resize:none;outline:none;tab-size:2}
+#editorContent{width:100%;height:65vh;min-height:340px;background:#010108;border:1px solid var(--bd);border-top:none;border-radius:0 0 12px 12px;padding:14px;color:#e6edf3;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.7;resize:vertical;outline:none;tab-size:2}
 
 /* ── লগ (টার্মিনাল স্টাইল) ── */
 .lbox{background:#020a02;border:1px solid #0f3d0f;border-radius:12px;padding:12px;height:calc(100vh - 170px);overflow-y:auto;font-family:'Courier New',monospace;font-size:11.5px;box-shadow:inset 0 0 30px rgba(0,255,0,.05)}
@@ -480,6 +499,7 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 </div>
 
 <div id="app" style="display:none">
+  <div class="app-bg"><div class="aorb a1"></div><div class="aorb a2"></div></div>
   <div class="top">
     <div class="top-logo" id="topLogo">🤖</div>
     <div class="top-name">Bot Panel</div>
@@ -734,7 +754,7 @@ async function loadFiles() {
   const order = ["", "commands", "utils"].filter((k) => groups[k]);
   for (const k of Object.keys(groups)) if (!order.includes(k)) order.push(k);
 
-  document.getElementById("fileList").innerHTML = order.map((folder) => {
+  document.getElementById("fileList").innerHTML = order.map((folder, idx) => {
     const list = groups[folder].sort((a, b) => a.path.localeCompare(b.path));
     const rows = list.map(f => \`
       <div class="frow" onclick="openFile('\${f.path}')">
@@ -751,9 +771,16 @@ async function loadFiles() {
           <button class="fab del" onclick="event.stopPropagation();quickDelete('\${f.path}')">🗑️</button>
         </span>
       </div>\`).join("");
-    return \`<div class="folder-head">\${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span></div>
-      <div class="flist">\${rows}</div>\`;
+    const isOpen = _openFolders[folder] !== false; // ডিফল্ট খোলা
+    return \`<div class="folder-head\${isOpen ? " open" : ""}" onclick="toggleFolder('\${folder}')">📂 \${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span><span class="chev">▶</span></div>
+      <div class="flist\${isOpen ? "" : " collapsed"}" id="flist-\${idx}">\${rows}</div>\`;
   }).join("");
+}
+
+let _openFolders = {};
+function toggleFolder(folder) {
+  _openFolders[folder] = _openFolders[folder] === false ? true : false;
+  loadFiles();
 }
 
 async function promptRename(p) {
