@@ -6,6 +6,7 @@ const AdmZip = require("adm-zip");
 const fs = require("fs-extra");
 const path = require("path");
 const { spawn } = require("child_process");
+const mongoStore = require("./utils/mongoStore");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -17,6 +18,40 @@ const EDITABLE_SUBDIRS = ["commands", "utils"]; // বটের ভেতরে 
 const ROOT_EDITABLE_FILES = [".env", "package.json"]; // বটের রুটে শুধু এই ফাইলগুলো এডিটযোগ্য
 
 fs.ensureDirSync(BDIR);
+
+// ✅ Render free tier-এ persistent disk নেই — কন্টেইনার রিক্রিয়েট হলে
+// bot/ ফোল্ডার খালি হয়ে যেতে পারে। এটা সামলাতে দুই স্তরের ব্যবস্থা:
+// ১) MongoDB-তে সিঙ্ক করা প্রতিটা ফাইল (সবচেয়ে আপ-টু-ডেট, প্রতিটা সেভ/
+//    ডিলিটেই আপডেট হয়) — এটাই প্রথম চেষ্টা।
+// ২) bot-template/ (এই রিপোতেই কমিট করা, শুধু প্রথমবার/Mongo না থাকলে)
+const TEMPLATE_DIR = path.join(__dirname, "bot-template");
+async function autoSeed() {
+  const isEmpty = (await fs.readdir(BDIR)).length === 0;
+  if (!isEmpty) return;
+
+  if (mongoStore.isConnected()) {
+    const count = await mongoStore.countAll();
+    if (count > 0) {
+      const files = await mongoStore.listAll();
+      for (const f of files) {
+        const full = path.join(BDIR, f.path);
+        await fs.ensureDir(path.dirname(full));
+        await fs.writeFile(full, f.content, "utf8");
+      }
+      pushLog("info", `🗄️ MongoDB থেকে ${files.length}টা ফাইল রিস্টোর হলো`);
+    }
+  }
+
+  // MongoDB থেকে কিছু না এলে (নতুন/খালি DB) বা index.js এখনো না থাকলে
+  // bot-template/ থেকে বেস কোড বসানো — commands/utils-এর runtime এডিট
+  // Mongo-তে থাকলে সেগুলো ওপরের ধাপেই ইতিমধ্যে বসে গেছে
+  if (!(await fs.pathExists(path.join(BDIR, "index.js"))) && (await fs.pathExists(path.join(TEMPLATE_DIR, "index.js")))) {
+    await fs.copy(TEMPLATE_DIR, BDIR, { overwrite: false });
+    pushLog("info", "🌱 bot-template/ থেকে বেস কোড বসানো হলো");
+  }
+
+  if (await fs.pathExists(path.join(BDIR, "index.js"))) npmInstallThenStart();
+}
 
 // ──────────────────────────── লগ রিং-বাফার ────────────────────────────
 const MAX_LOG_LINES = 800;
@@ -99,6 +134,30 @@ function auth(req, res, next) {
   next();
 }
 
+// জিপ আপলোডের পর commands/utils/package.json — সবকিছু MongoDB-তে সিঙ্ক
+// করা (.env ইচ্ছা করেই বাদ — সিক্রেট key ডাটাবেজে না রাখাই ভালো অভ্যাস,
+// সেগুলো Render Environment Variables-এ রাখুন)
+async function syncAllToMongo() {
+  if (!mongoStore.isConnected()) return 0;
+  let count = 0;
+  for (const dir of EDITABLE_SUBDIRS) {
+    const dirPath = path.join(BDIR, dir);
+    if (!(await fs.pathExists(dirPath))) continue;
+    for (const f of await fs.readdir(dirPath)) {
+      if (!f.endsWith(".js")) continue;
+      const content = await fs.readFile(path.join(dirPath, f), "utf8");
+      await mongoStore.saveFile(`${dir}/${f}`, content);
+      count++;
+    }
+  }
+  const pkgPath = path.join(BDIR, "package.json");
+  if (await fs.pathExists(pkgPath)) {
+    await mongoStore.saveFile("package.json", await fs.readFile(pkgPath, "utf8"));
+    count++;
+  }
+  return count;
+}
+
 // ──────────────────────────── আপলোড (zip → bot/) ────────────────────────────
 const upload = multer({ storage: multer.diskStorage({ destination: "/tmp", filename: (r, f, cb) => cb(null, Date.now() + "_" + f.originalname) }), limits: { fileSize: 200 * 1024 * 1024 } });
 
@@ -126,7 +185,8 @@ app.post("/api/upload", auth, upload.single("zip"), async (req, res) => {
     }
 
     await fs.remove(req.file.path);
-    pushLog("info", `📦 জিপ এক্সট্র্যাক্ট হলো (${entries.length} এন্ট্রি)`);
+    const syncedCount = await syncAllToMongo();
+    pushLog("info", `📦 জিপ এক্সট্র্যাক্ট হলো (${entries.length} এন্ট্রি), MongoDB-তে ${syncedCount}টা ফাইল সিঙ্ক হলো`);
     res.json({ ok: true, msg: "জিপ এক্সট্র্যাক্ট হয়েছে। এখন 'Install + Start' চাপুন।" });
   } catch (e) {
     pushLog("error", "❌ আপলোড ব্যর্থ: " + e.message);
@@ -201,6 +261,9 @@ app.post("/api/file", auth, async (req, res) => {
     }
     await fs.ensureDir(path.dirname(full));
     await fs.writeFile(full, content, "utf8");
+    if (relPath !== ".env") {
+      mongoStore.saveFile(relPath, content).catch((e) => pushLog("error", "Mongo সিঙ্ক ব্যর্থ: " + e.message));
+    }
     pushLog("info", `✏️ ফাইল সেভ হলো: ${relPath}`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -208,9 +271,11 @@ app.post("/api/file", auth, async (req, res) => {
 
 app.delete("/api/file", auth, async (req, res) => {
   try {
-    const full = safeResolve(req.body?.path || req.query.path);
+    const relPath = req.body?.path || req.query.path;
+    const full = safeResolve(relPath);
     await fs.remove(full);
-    pushLog("info", `🗑️ ফাইল ডিলিট হলো: ${req.query.path || req.body.path}`);
+    mongoStore.deleteFile(relPath).catch((e) => pushLog("error", "Mongo সিঙ্ক ব্যর্থ: " + e.message));
+    pushLog("info", `🗑️ ফাইল ডিলিট হলো: ${relPath}`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -228,43 +293,66 @@ const PANEL_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bot Panel</title>
 <style>
-:root{color-scheme:dark}
-body{margin:0;font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;padding-bottom:40px}
-header{padding:14px 16px;background:#161b22;border-bottom:1px solid #30363d;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center}
-header h1{font-size:18px;margin:0}
-.badge{font-size:12px;padding:4px 10px;border-radius:20px;background:#30363d}
-.badge.running{background:#1f6f3d}
-.badge.stopped{background:#5a1e1e}
-.badge.installing,.badge.starting{background:#6e5a12}
-.tabs{display:flex;gap:8px;padding:10px 16px;background:#161b22;overflow-x:auto}
-.tab{padding:8px 14px;border-radius:20px;background:#21262d;white-space:nowrap;font-size:14px}
-.tab.active{background:#2f81f7;color:#fff}
-.content{padding:14px 16px}
-.card{background:#161b22;border-radius:10px;padding:14px;margin-bottom:12px}
-.file-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#161b22;border-radius:10px;margin-bottom:8px}
-button{background:#2f81f7;color:#fff;border:none;padding:9px 14px;border-radius:8px;font-size:14px;margin:3px 3px 3px 0}
-button.danger{background:#da3633}
-button.secondary{background:#30363d}
-button.success{background:#2ea043}
-textarea{width:100%;height:55vh;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;box-sizing:border-box}
-input[type=text],input[type=password],input[type=file]{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;margin-bottom:10px}
-.log-line{font-family:monospace;font-size:12px;padding:4px 0;border-bottom:1px solid #21262d;white-space:pre-wrap;word-break:break-all}
+:root{color-scheme:dark;--accent:#2f81f7;--accent2:#7c5cff;--bg:#0b0e14;--card:#141922;--border:#242c3a}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,system-ui,"Segoe UI",sans-serif;background:var(--bg);color:#e6edf3;padding-bottom:50px}
+header{padding:16px;background:linear-gradient(135deg,#161b22 0%,#1c2333 100%);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 12px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 2px 10px rgba(124,92,255,.4)}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+header .sub{font-size:11px;color:#8b949e;margin-top:1px}
+.badge{font-size:11px;padding:5px 12px;border-radius:20px;background:var(--border);font-weight:600;letter-spacing:.3px}
+.badge.running{background:linear-gradient(135deg,#1f6f3d,#2ea043);box-shadow:0 0 10px rgba(46,160,67,.4)}
+.badge.stopped{background:linear-gradient(135deg,#5a1e1e,#da3633)}
+.badge.installing,.badge.starting{background:linear-gradient(135deg,#6e5a12,#d9a521);color:#1a1300}
+.tabs{display:flex;gap:6px;padding:12px 14px;background:#10141c;overflow-x:auto;border-bottom:1px solid var(--border)}
+.tab{padding:9px 15px;border-radius:22px;background:var(--card);white-space:nowrap;font-size:13.5px;font-weight:600;color:#9198a1;border:1px solid var(--border)}
+.tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;box-shadow:0 2px 10px rgba(47,129,247,.35)}
+.content{padding:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:14px;color:#9198a1;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.file-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+.file-row .fname{font-family:monospace;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.file-row .fname .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+button{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-size:13.5px;margin:3px 3px 3px 0;font-weight:600;transition:opacity .15s}
+button:active{opacity:.75}
+button.danger{background:linear-gradient(135deg,#c23b3b,#da3633)}
+button.secondary{background:var(--border);color:#e6edf3}
+button.success{background:linear-gradient(135deg,#2ea043,#22863a)}
+textarea{width:100%;height:52vh;background:#0b0e14;color:#e6edf3;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:"SF Mono",monospace;font-size:12.5px;box-sizing:border-box}
+input[type=text],input[type=password],input[type=file]{width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1px solid var(--border);background:#0b0e14;color:#e6edf3;margin-bottom:10px;font-size:14px}
+input[type=text]:focus,input[type=password]:focus{outline:none;border-color:var(--accent)}
+.log-line{font-family:"SF Mono",monospace;font-size:11.5px;padding:5px 0;border-bottom:1px solid #1a2029;white-space:pre-wrap;word-break:break-all}
 .log-error{color:#f85149}.log-warn{color:#e3b341}
 .hidden{display:none}
 .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.status-box{background:#161b22;padding:12px;border-radius:10px}
-.status-box b{font-size:18px;display:block}
+.status-box{background:var(--card);border:1px solid var(--border);padding:14px;border-radius:12px}
+.status-box b{font-size:19px;display:block;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.status-box .lbl{font-size:12px;color:#8b949e;margin-top:2px}
+.empty{text-align:center;color:#6e7681;padding:30px 10px;font-size:13.5px}
 </style></head>
 <body>
-<div id="loginScreen" class="content">
-  <h2>🔒 Bot Panel লগইন</h2>
-  <input type="password" id="pwInput" placeholder="PANEL_PASSWORD দিন">
-  <button onclick="doLogin()" style="width:100%">লগইন</button>
+<div id="loginScreen" class="content" style="max-width:380px;margin:60px auto 0">
+  <div style="text-align:center;margin-bottom:26px">
+    <div class="logo" style="width:60px;height:60px;font-size:30px;margin:0 auto 14px">🤖</div>
+    <h2 style="margin:0">Bot Panel</h2>
+    <p style="color:#8b949e;font-size:13px;margin-top:4px">official-messenger-bot নিয়ন্ত্রণ কেন্দ্র</p>
+  </div>
+  <div class="card">
+    <input type="password" id="pwInput" placeholder="PANEL_PASSWORD দিন">
+    <button onclick="doLogin()" style="width:100%">🔓 লগইন করুন</button>
+  </div>
 </div>
 
 <div id="app" class="hidden">
-  <header><h1>🤖 Bot Panel</h1><span id="stateBadge" class="badge">...</span></header>
+  <header>
+    <div class="brand">
+      <div class="logo">🤖</div>
+      <div><h1>Bot Panel</h1><div class="sub">official-messenger-bot</div></div>
+    </div>
+    <span id="stateBadge" class="badge">...</span>
+  </header>
   <div class="tabs">
     <div class="tab active" data-tab="deploy" onclick="switchTab('deploy')">🚀 ডিপ্লয়</div>
     <div class="tab" data-tab="files" onclick="switchTab('files')">📁 ফাইল</div>
@@ -275,12 +363,14 @@ input[type=text],input[type=password],input[type=file]{width:100%;box-sizing:bor
 
     <div id="tab-deploy">
       <div class="card">
-        <p>official-bot.zip আপলোড করুন (পুরনো bot/ ফোল্ডার মুছে নতুনটা বসবে):</p>
+        <h3>জিপ আপলোড</h3>
+        <p style="font-size:13px;color:#9198a1;margin-top:0">official-bot.zip আপলোড করুন (পুরনো bot/ ফোল্ডার মুছে নতুনটা বসবে):</p>
         <input type="file" id="zipInput" accept=".zip">
         <button onclick="uploadZip()" class="success">⬆️ আপলোড করুন</button>
         <p id="uploadMsg" style="font-size:13px;color:#9198a1"></p>
       </div>
       <div class="card">
+        <h3>কন্ট্রোল</h3>
         <div class="row">
           <button onclick="botAction('install-start')" class="success">📦 Install + Start</button>
           <button onclick="botAction('start')">▶️ Start</button>
@@ -291,6 +381,11 @@ input[type=text],input[type=password],input[type=file]{width:100%;box-sizing:bor
     </div>
 
     <div id="tab-files" class="hidden">
+      <div class="card">
+        <h3>নতুন ফাইল যোগ করুন</h3>
+        <input type="text" id="newFilePath" placeholder="commands/mycommand.js">
+        <button onclick="createFile()" class="success" style="width:100%">➕ ফাইল তৈরি করুন</button>
+      </div>
       <div id="fileList"></div>
     </div>
 
@@ -382,8 +477,23 @@ async function botAction(action) {
 async function loadFiles() {
   const { files } = await api("/api/files");
   document.getElementById("fileList").innerHTML = files.map(f =>
-    \`<div class="file-row"><span>\${f.path}</span><button class="secondary" onclick="openFile('\${f.path}')">এডিট</button></div>\`
-  ).join("") || "<p>এখনো কোনো ফাইল আপলোড হয়নি</p>";
+    \`<div class="file-row"><span class="fname"><span class="dot"></span>\${f.path}</span><button class="secondary" onclick="openFile('\${f.path}')">✏️ এডিট</button></div>\`
+  ).join("") || "<div class='empty'>এখনো কোনো ফাইল আপলোড হয়নি</div>";
+}
+
+async function createFile() {
+  const p = document.getElementById("newFilePath").value.trim();
+  if (!p) return alert("ফাইলের পাথ দিন, যেমন commands/mycommand.js");
+  const isJs = p.endsWith(".js");
+  const template = isJs
+    ? "\\"use strict\\";\\nmodule.exports = async function (senderId, args, { sendText }) {\\n  await sendText(senderId, 'হ্যালো! এটা একটা নতুন কমান্ড।');\\n};\\n"
+    : "";
+  try {
+    await api("/api/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p, content: template }) });
+    document.getElementById("newFilePath").value = "";
+    loadFiles();
+    alert("✅ ফাইল তৈরি হয়েছে — লিস্টে গিয়ে এডিট করুন");
+  } catch (e) { alert("❌ " + e.message); }
 }
 
 async function openFile(p) {
@@ -425,10 +535,10 @@ async function loadLogs() {
 async function loadStatus() {
   const s = await api("/api/status");
   document.getElementById("statusGrid").innerHTML = \`
-    <div class="status-box"><b>\${s.botState}</b>বট স্ট্যাটাস</div>
-    <div class="status-box"><b>\${Math.floor(s.panelUptimeSec/60)} মিনিট</b>প্যানেল আপটাইম</div>
-    <div class="status-box"><b>\${s.memoryMB} MB</b>মেমরি</div>
-    <div class="status-box"><b>\${s.hasProject ? "✅" : "❌"}</b>প্রজেক্ট আপলোড আছে</div>\`;
+    <div class="status-box"><b>\${s.botState}</b><div class="lbl">বট স্ট্যাটাস</div></div>
+    <div class="status-box"><b>\${Math.floor(s.panelUptimeSec/60)}m</b><div class="lbl">প্যানেল আপটাইম</div></div>
+    <div class="status-box"><b>\${s.memoryMB} MB</b><div class="lbl">মেমরি</div></div>
+    <div class="status-box"><b>\${s.hasProject ? "✅" : "❌"}</b><div class="lbl">প্রজেক্ট আপলোড আছে</div></div>\`;
 }
 
 boot();
@@ -438,4 +548,10 @@ boot();
 process.on("unhandledRejection", (r) => pushLog("error", "unhandledRejection: " + r));
 process.on("uncaughtException", (e) => pushLog("error", "uncaughtException: " + e.message));
 
-app.listen(PORT, () => console.log(`🎛️ Panel চালু — পোর্ট ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🎛️ Panel চালু — পোর্ট ${PORT}`);
+  mongoStore
+    .connect()
+    .then(() => autoSeed())
+    .catch((e) => pushLog("error", "স্টার্টআপ সিড ব্যর্থ: " + e.message));
+});

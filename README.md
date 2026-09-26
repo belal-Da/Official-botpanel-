@@ -2,6 +2,18 @@
 
 এটা একটা স্বতন্ত্র প্যানেল — নিজে কোনো বট না, শুধু আপনার `official-messenger-bot.zip` আপলোড নিয়ে সেটাকে সাবপ্রসেস হিসেবে চালায় ও কন্ট্রোল করে (ঠিক আপনার আগের Belal-bot-panel-এর মতোই, শুধু এবার এটা official Graph API বটের জন্য)।
 
+## ⚠️ Render free tier: ফাইল হারানো ঠেকানোর ব্যবস্থা
+
+Render free tier-এ persistent disk নেই — কন্টেইনার রিক্রিয়েট হলে রানটাইমে আপলোড করা `bot/` ফোল্ডার হারিয়ে যেতে পারে। এখন এটা **MongoDB দিয়ে সমাধান করা আছে**:
+
+- প্যানেল থেকে যখনই কোনো ফাইল (কমান্ড/utils) সেভ, নতুন তৈরি বা ডিলিট করবেন, সাথে সাথেই MongoDB-তেও সিঙ্ক হয়ে যাবে
+- সার্ভার বুট হওয়ার সময় প্রথমে MongoDB চেক করবে — ফাইল পেলে সেখান থেকেই সব রিস্টোর করে বট চালু করবে
+- MongoDB-তে কিছু না থাকলে (একদম প্রথমবার) `bot-template/`-এর বেস কোড ব্যবহার হবে
+
+তাই এখন থেকে **ম্যানুয়ালি কিছু করারই দরকার নেই** — শুধু `MONGODB_URI` এনভায়রনমেন্ট ভ্যারিয়েবলটা ঠিকভাবে বসানো থাকলেই সব স্বয়ংক্রিয়ভাবে টিকে থাকবে।
+
+⚠️ নিরাপত্তার জন্য `.env` (Page Access Token, RapidAPI key ইত্যাদি) ইচ্ছা করেই MongoDB-তে সিঙ্ক করা হয় না — এই secrets গুলো disk-এ না রেখে সরাসরি Render Dashboard-এর Environment Variables-এ বসান, তাহলে সেগুলোও কখনো হারাবে না।
+
 ## GitHub-এ রাখা
 
 1. এই ফোল্ডারটা (`panel-host/`) একটা নতুন GitHub রিপোতে পুশ করুন — এটা আপনার `official-messenger-bot` প্রজেক্ট থেকে **সম্পূর্ণ আলাদা রিপো**
@@ -14,6 +26,7 @@
 3. Start command: `node server.js`
 4. Environment Variables:
    - `PANEL_PASSWORD` = নিজের শক্ত পাসওয়ার্ড
+   - `MONGODB_URI` = আপনার MongoDB Atlas connection string (commands/utils ফাইল persist রাখতে)
    - `PORT` = `10000` (Render নিজে থেকেও একটা PORT দেয়, দুটোই কাজ করবে)
 5. ডিপ্লয় হওয়ার পর পাওয়া URL-এ যান (যেমন `https://your-panel.onrender.com`)
 
