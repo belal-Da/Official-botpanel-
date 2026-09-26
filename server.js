@@ -312,8 +312,12 @@ header .sub{font-size:11px;color:#8b949e;margin-top:1px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:14px;color:#9198a1;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
 .file-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
-.file-row .fname{font-family:monospace;font-size:13.5px;display:flex;align-items:center;gap:8px}
-.file-row .fname .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.file-row .fname{font-family:monospace;font-size:13.5px;display:flex;align-items:center;gap:8px;overflow:hidden}
+.file-row .fname .ico{font-size:15px;flex-shrink:0}
+.file-row .fname .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folder-group{margin-bottom:18px}
+.folder-head{display:flex;align-items:center;gap:8px;padding:4px 4px 10px;color:#9198a1;font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);margin-bottom:10px}
+.folder-head .count{background:var(--border);color:#c9d1d9;font-size:10.5px;padding:2px 8px;border-radius:10px;font-weight:600;text-transform:none;letter-spacing:0}
 button{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-size:13.5px;margin:3px 3px 3px 0;font-weight:600;transition:opacity .15s}
 button:active{opacity:.75}
 button.danger{background:linear-gradient(135deg,#c23b3b,#da3633)}
@@ -474,11 +478,46 @@ async function botAction(action) {
   setTimeout(refreshBadge, 1500);
 }
 
+function fileIcon(p) {
+  if (p.endsWith(".env")) return "🔐";
+  if (p.endsWith(".json")) return "⚙️";
+  if (p.endsWith(".md")) return "📘";
+  if (p.startsWith("commands/")) return "⚡";
+  if (p.startsWith("utils/")) return "🧩";
+  return "📄";
+}
+
+const FOLDER_LABELS = { "": "রুট ফাইল", commands: "⚡ কমান্ড", utils: "🧩 ইউটিলিটি" };
+
 async function loadFiles() {
   const { files } = await api("/api/files");
-  document.getElementById("fileList").innerHTML = files.map(f =>
-    \`<div class="file-row"><span class="fname"><span class="dot"></span>\${f.path}</span><button class="secondary" onclick="openFile('\${f.path}')">✏️ এডিট</button></div>\`
-  ).join("") || "<div class='empty'>এখনো কোনো ফাইল আপলোড হয়নি</div>";
+  if (!files.length) {
+    document.getElementById("fileList").innerHTML = "<div class='empty'>এখনো কোনো ফাইল আপলোড হয়নি</div>";
+    return;
+  }
+
+  // ফোল্ডার অনুযায়ী গ্রুপ করা: root ফাইল আগে, তারপর commands/, তারপর utils/
+  const groups = {};
+  for (const f of files) {
+    const parts = f.path.split("/");
+    const folder = parts.length > 1 ? parts[0] : "";
+    (groups[folder] = groups[folder] || []).push(f);
+  }
+  const order = ["", "commands", "utils"].filter((k) => groups[k]);
+  for (const k of Object.keys(groups)) if (!order.includes(k)) order.push(k);
+
+  document.getElementById("fileList").innerHTML = order.map((folder) => {
+    const list = groups[folder].sort((a, b) => a.path.localeCompare(b.path));
+    const rows = list.map(f => \`
+      <div class="file-row">
+        <span class="fname"><span class="ico">\${fileIcon(f.path)}</span><span class="nm">\${f.path.split("/").pop()}</span></span>
+        <button class="secondary" onclick="openFile('\${f.path}')">✏️ এডিট</button>
+      </div>\`).join("");
+    return \`<div class="folder-group">
+      <div class="folder-head">\${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span></div>
+      \${rows}
+    </div>\`;
+  }).join("");
 }
 
 async function createFile() {
