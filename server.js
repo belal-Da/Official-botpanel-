@@ -1,6 +1,8 @@
 "use strict";
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
+const querystring = require("querystring");
 const multer = require("multer");
 const AdmZip = require("adm-zip");
 const fs = require("fs-extra");
@@ -13,6 +15,14 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = process.env.PORT || 10000;
 const PASSWORD = process.env.PANEL_PASSWORD;
+// ✅ প্যানেল নিজেই এই PORT-এ Render-এর পাবলিক URL-এ শোনে। বট সাবপ্রসেসটাও
+// যদি process.env.PORT ইনহেরিট করে একই পোর্টে bind করতে চায়, EADDRINUSE
+// ক্র্যাশ হবে (একই কন্টেইনারে দুইটা প্রসেস একই পোর্টে শুনতে পারে না)।
+// তাই বটকে সবসময় একটা আলাদা, নির্দিষ্ট অভ্যন্তরীণ পোর্টে চালানো হয়
+// (bot/.env-এ PORT দিলেও সেটা এখানে override হয়ে যাবে) — আর Meta-র
+// webhook কল (পাবলিক প্যানেল URL-এ আসা) নিচের প্রক্সি দিয়ে এই পোর্টে
+// ফরওয়ার্ড করা হয়।
+const BOT_PORT = 3000;
 const BDIR = path.join(__dirname, "bot"); // এখানেই আপলোড করা official-bot প্রজেক্ট এক্সট্র্যাক্ট হবে
 // ✅ আগে শুধু commands/ ও utils/ ফোল্ডার চেনা যেত, তাই zip-এ অন্য কোনো
 // ফোল্ডার/ফাইল থাকলে প্যানেলে দেখাতো না। এখন bot/ এর ভেতরের সবকিছু
@@ -101,7 +111,7 @@ function startBot() {
   }
   botState = "starting";
   pushLog("info", "🚀 বট চালু হচ্ছে...");
-  botProc = spawnLogged("node", ["index.js"], {}, (code) => {
+  botProc = spawnLogged("node", ["index.js"], { env: { ...process.env, PORT: String(BOT_PORT) } }, (code) => {
     botState = "stopped";
     pushLog("error", `⚠️ বট বন্ধ হয়ে গেছে (exit ${code})`);
     botProc = null;
@@ -362,6 +372,30 @@ app.get("/api/backup/zip", (req, res) => {
 // Render free tier নিষ্ক্রিয় থাকলে ঘুমিয়ে পড়ে — UptimeRobot প্রতি কয়েক
 // মিনিটে এই URL-এ পিং করলে সার্ভার জেগে থাকবে
 app.get("/ping", (req, res) => res.status(200).send("OK " + new Date().toISOString()));
+
+// ──────────────────────────── Webhook প্রক্সি (Meta → প্যানেল পাবলিক URL → বট BOT_PORT) ────────────────────────────
+// Meta-কে দেওয়া webhook URL এই প্যানেলেরই পাবলিক ডোমেইন (https://<panel>.onrender.com/webhook)।
+// আসল হ্যান্ডলিং কোড bot/index.js-এ, যেটা ভেতরে-ভেতরে BOT_PORT-এ শোনে — তাই এখানে ফরওয়ার্ড করা হচ্ছে।
+function proxyToBot(path, method, bodyBuf, res) {
+  const headers = { "Content-Type": "application/json" };
+  if (bodyBuf) headers["Content-Length"] = Buffer.byteLength(bodyBuf);
+  const preq = http.request({ hostname: "127.0.0.1", port: BOT_PORT, path, method, headers, timeout: 15000 }, (pres) => {
+    res.writeHead(pres.statusCode, pres.headers);
+    pres.pipe(res, { end: true });
+  });
+  preq.on("error", (e) => res.status(502).send("বট এখনো রেসপন্স দিচ্ছে না (চালু আছে কিনা প্যানেল থেকে চেক করুন): " + e.message));
+  preq.on("timeout", () => preq.destroy());
+  if (bodyBuf) preq.write(bodyBuf);
+  preq.end();
+}
+app.get("/webhook", (req, res) => {
+  const qs = querystring.stringify(req.query);
+  proxyToBot("/webhook" + (qs ? "?" + qs : ""), "GET", null, res);
+});
+app.post("/webhook", (req, res) => {
+  const body = Buffer.from(JSON.stringify(req.body || {}));
+  proxyToBot("/webhook", "POST", body, res);
+});
 
 // ──────────────────────────── প্যানেল UI ────────────────────────────
 app.get("/", (req, res) => res.type("html").send(PANEL_HTML));
