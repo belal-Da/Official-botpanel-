@@ -290,191 +290,321 @@ app.get("/", (req, res) => res.type("html").send(PANEL_HTML));
 
 const PANEL_HTML = `<!DOCTYPE html>
 <html lang="bn"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#07070e">
 <title>Bot Panel</title>
 <style>
-:root{color-scheme:dark;--accent:#2f81f7;--accent2:#7c5cff;--bg:#0b0e14;--card:#141922;--border:#242c3a}
-*{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,system-ui,"Segoe UI",sans-serif;background:var(--bg);color:#e6edf3;padding-bottom:50px}
-header{padding:16px;background:linear-gradient(135deg,#161b22 0%,#1c2333 100%);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 12px rgba(0,0,0,.35)}
-.brand{display:flex;align-items:center;gap:10px}
-.logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 2px 10px rgba(124,92,255,.4)}
-header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
-header .sub{font-size:11px;color:#8b949e;margin-top:1px}
-.badge{font-size:11px;padding:5px 12px;border-radius:20px;background:var(--border);font-weight:600;letter-spacing:.3px}
-.badge.running{background:linear-gradient(135deg,#1f6f3d,#2ea043);box-shadow:0 0 10px rgba(46,160,67,.4)}
-.badge.stopped{background:linear-gradient(135deg,#5a1e1e,#da3633)}
-.badge.installing,.badge.starting{background:linear-gradient(135deg,#6e5a12,#d9a521);color:#1a1300}
-.tabs{display:flex;gap:6px;padding:12px 14px;background:#10141c;overflow-x:auto;border-bottom:1px solid var(--border)}
-.tab{padding:9px 15px;border-radius:22px;background:var(--card);white-space:nowrap;font-size:13.5px;font-weight:600;color:#9198a1;border:1px solid var(--border)}
-.tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;box-shadow:0 2px 10px rgba(47,129,247,.35)}
-.content{padding:16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
-.card h3{margin:0 0 10px;font-size:14px;color:#9198a1;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.file-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
-.file-row .fname{font-family:monospace;font-size:13.5px;display:flex;align-items:center;gap:8px;overflow:hidden}
-.file-row .fname .ico{font-size:15px;flex-shrink:0}
-.file-row .fname .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.folder-group{margin-bottom:18px}
-.folder-head{display:flex;align-items:center;gap:8px;padding:4px 4px 10px;color:#9198a1;font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);margin-bottom:10px}
-.folder-head .count{background:var(--border);color:#c9d1d9;font-size:10.5px;padding:2px 8px;border-radius:10px;font-weight:600;text-transform:none;letter-spacing:0}
-button{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-size:13.5px;margin:3px 3px 3px 0;font-weight:600;transition:opacity .15s}
-button:active{opacity:.75}
-button.danger{background:linear-gradient(135deg,#c23b3b,#da3633)}
-button.secondary{background:var(--border);color:#e6edf3}
-button.success{background:linear-gradient(135deg,#2ea043,#22863a)}
-textarea{width:100%;height:52vh;background:#0b0e14;color:#e6edf3;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:"SF Mono",monospace;font-size:12.5px;box-sizing:border-box}
-input[type=text],input[type=password],input[type=file]{width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1px solid var(--border);background:#0b0e14;color:#e6edf3;margin-bottom:10px;font-size:14px}
-input[type=text]:focus,input[type=password]:focus{outline:none;border-color:var(--accent)}
-.log-line{font-family:"SF Mono",monospace;font-size:11.5px;padding:5px 0;border-bottom:1px solid #1a2029;white-space:pre-wrap;word-break:break-all}
-.log-error{color:#f85149}.log-warn{color:#e3b341}
-.hidden{display:none}
-.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.status-box{background:var(--card);border:1px solid var(--border);padding:14px;border-radius:12px}
-.status-box b{font-size:19px;display:block;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-.status-box .lbl{font-size:12px;color:#8b949e;margin-top:2px}
-.empty{text-align:center;color:#6e7681;padding:30px 10px;font-size:13.5px}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#07070e;--s1:#0d0d18;--s2:#141424;--s3:#1a1a2e;--bd:#232338;--tx:#dde0f0;--mu:#5a5a80;--ac:#6c63ff;--gr:#3ecf8e;--rd:#f05252;--yw:#f0b429;--bl:#38bdf8}
+body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;overflow-x:hidden}
+
+/* ── লগইন স্ক্রিন ── */
+#loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.bg{position:fixed;inset:0}
+.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.22;animation:fl 8s ease-in-out infinite}
+.o1{width:500px;height:500px;background:#6c63ff;top:-150px;left:-150px}
+.o2{width:350px;height:350px;background:#ff6584;bottom:-100px;right:-100px;animation-delay:4s}
+.o3{width:200px;height:200px;background:#43e97b;top:40%;left:45%;animation-delay:2s}
+@keyframes fl{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+.card{position:relative;z-index:1;background:rgba(255,255,255,.04);backdrop-filter:blur(40px);border:1px solid rgba(255,255,255,.08);border-radius:28px;padding:48px 34px;width:90%;max-width:400px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.logo-lg{width:84px;height:84px;margin:0 auto 20px;background:linear-gradient(135deg,#6c63ff,#ff6584);border-radius:24px;display:flex;align-items:center;justify-content:center;font-size:38px;box-shadow:0 0 60px rgba(108,99,255,.5);animation:pulse 3s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 40px rgba(108,99,255,.4)}50%{box-shadow:0 0 90px rgba(108,99,255,.9)}}
+.card h1{color:#fff;font-size:23px;font-weight:900;margin-bottom:4px}
+.card .sub{color:rgba(255,255,255,.35);font-size:13px;margin-bottom:32px}
+#loginScreen input{width:100%;padding:15px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#fff;font-size:15px;outline:none;margin-bottom:14px;transition:.3s}
+#loginScreen input:focus{border-color:#6c63ff;background:rgba(108,99,255,.1)}
+.login-btn{width:100%;padding:15px;border-radius:14px;border:none;background:linear-gradient(135deg,#6c63ff,#ff6584);color:#fff;font-size:16px;font-weight:800;cursor:pointer;transition:.3s}
+.login-btn:active{transform:scale(.98)}
+.login-err{background:rgba(255,85,85,.1);border:1px solid rgba(255,85,85,.2);color:#ff8080;padding:11px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
+.login-err.show{display:block}
+
+/* ── টপ বার ── */
+.top{position:fixed;top:0;left:0;right:0;height:54px;background:rgba(13,13,24,.97);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 14px;z-index:200;gap:10px;padding-top:env(safe-area-inset-top,0px)}
+.top-logo{width:34px;height:34px;background:linear-gradient(135deg,var(--ac),#ff6584);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;box-shadow:0 0 20px rgba(108,99,255,.4)}
+.top-logo.live{animation:logoPulse 1.8s ease-in-out infinite}
+@keyframes logoPulse{0%,100%{box-shadow:0 0 20px rgba(108,99,255,.4),0 0 0 0 rgba(46,213,115,.5)}50%{box-shadow:0 0 28px rgba(108,99,255,.7),0 0 0 8px rgba(46,213,115,0)}}
+.top-name{font-size:15px;font-weight:800;color:#fff;flex:1}
+.top-dot{width:8px;height:8px;border-radius:50%;background:var(--rd);flex-shrink:0}
+.top-dot.on{background:var(--gr);box-shadow:0 0 8px var(--gr);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.top-pill{font-size:10.5px;font-weight:700;padding:4px 10px;border-radius:99px;background:var(--s2);border:1px solid var(--bd);text-transform:uppercase;letter-spacing:.4px}
+
+/* ── বটম ট্যাব ── */
+.tabs{position:fixed;bottom:0;left:0;right:0;background:rgba(13,13,24,.97);backdrop-filter:blur(20px);border-top:1px solid var(--bd);display:grid;grid-template-columns:repeat(4,1fr);height:60px;z-index:200;padding-bottom:env(safe-area-inset-bottom,0px)}
+.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:none;background:transparent;color:var(--mu);transition:.15s;position:relative}
+.tab.active{color:var(--ac)}
+.tab .ti{font-size:21px;line-height:1}
+.tab .tl{font-size:9.5px;font-weight:700}
+.tab::after{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:0;height:2px;background:var(--ac);border-radius:0 0 3px 3px;transition:.2s}
+.tab.active::after{width:36px}
+
+.main{padding:66px 12px 76px;min-height:100vh}
+.page{display:none}.page.active{display:block}
+.pg-title{font-size:15px;font-weight:800;color:#fff;margin:4px 0 12px}
+
+/* ── স্ট্যাট কার্ড ── */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.sc{background:linear-gradient(135deg,var(--s2),var(--s3));border:1px solid var(--bd);border-radius:14px;padding:14px}
+.sc-i{font-size:22px;margin-bottom:6px}
+.sc-v{font-size:18px;font-weight:900;color:#fff}
+.sc-l{font-size:10px;color:var(--mu);margin-top:2px}
+
+.bc{background:var(--s2);border:1px solid var(--bd);border-radius:16px;padding:14px;margin-bottom:14px}
+.bc h3{font-size:12px;color:var(--mu);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;font-weight:800}
+
+/* ── আপলোড জোন ── */
+.upzone{border:2px dashed var(--bd);border-radius:16px;padding:34px 16px;text-align:center;cursor:pointer;background:var(--s2);margin-bottom:12px;transition:.2s}
+.upzone:active{border-color:var(--ac);background:rgba(108,99,255,.06)}
+.uz-i{font-size:44px;margin-bottom:10px;animation:bounce 2s ease-in-out infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.uz-t{font-size:13px;color:var(--tx);font-weight:700}
+.uz-s{font-size:11px;color:var(--mu);margin-top:4px}
+#zipInput{display:none}
+
+/* ── বাটন ── */
+.btn{padding:12px 8px;border-radius:12px;border:none;font-size:12.5px;font-weight:800;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:6px}
+.btn:active{transform:scale(.96)}
+.b-start{background:linear-gradient(135deg,#3ecf8e,#22d3ee);color:#000}
+.b-stop{background:linear-gradient(135deg,#f05252,#fb7185);color:#fff}
+.b-restart{background:linear-gradient(135deg,#f0b429,#fb923c);color:#000}
+.b-install{background:linear-gradient(135deg,#38bdf8,#6c63ff);color:#fff}
+.b-ghost{background:transparent;border:1px solid var(--bd);color:var(--tx)}
+.bg2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bg2.full{margin-top:8px}
+
+/* ── ফাইল ম্যানেজার ── */
+.sinput{width:100%;padding:11px 14px;border-radius:11px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);font-size:13px;outline:none;margin-bottom:10px;transition:.2s}
+.sinput:focus{border-color:var(--ac)}
+.folder-head{display:flex;align-items:center;gap:8px;padding:2px 2px 9px;color:var(--mu);font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+.folder-head .count{background:var(--bd);color:#c9d1d9;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;text-transform:none;letter-spacing:0}
+.flist{background:var(--s2);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin-bottom:16px}
+.frow{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;transition:.12s}
+.frow:last-child{border-bottom:none}
+.frow:active{background:rgba(108,99,255,.08)}
+.fi{font-size:18px;flex-shrink:0;width:22px;text-align:center}
+.fn{flex:1;overflow:hidden}
+.fn-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.fab{padding:6px 10px;border-radius:8px;border:none;background:var(--s3);color:var(--mu);font-size:11px;cursor:pointer}
+.empty-fm{padding:36px 14px;text-align:center;color:var(--mu);font-size:13px}
+
+/* ── এডিটর ── */
+.ed-top{background:var(--s2);border:1px solid var(--bd);border-radius:12px 12px 0 0;padding:10px 12px;display:flex;align-items:center;gap:8px}
+.ed-fn{flex:1;font-size:12px;color:var(--ac);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ced{width:100%;height:calc(100vh - 250px);background:#010108;border:1px solid var(--bd);border-top:none;border-radius:0 0 12px 12px;padding:14px;color:#e6edf3;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.7;resize:none;outline:none;tab-size:2}
+
+/* ── লগ (টার্মিনাল স্টাইল) ── */
+.lbox{background:#020a02;border:1px solid #0f3d0f;border-radius:12px;padding:12px;height:calc(100vh - 170px);overflow-y:auto;font-family:'Courier New',monospace;font-size:11.5px;box-shadow:inset 0 0 30px rgba(0,255,0,.05)}
+.le{margin-bottom:5px;white-space:pre-wrap;word-break:break-all;line-height:1.6}
+.le .lt{color:#3a6b3a;font-size:10px;margin-right:6px}
+.le.li{color:#4dff4d;text-shadow:0 0 3px rgba(77,255,77,.3)}
+.le.lw{color:#ffd24d;text-shadow:0 0 3px rgba(255,210,77,.3)}
+.le.lr{color:#ff5c5c;text-shadow:0 0 3px rgba(255,92,92,.3)}
+
+.empty{text-align:center;color:var(--mu);padding:30px 10px;font-size:13.5px}
+
+/* ── toast ── */
+.tw{position:fixed;top:62px;right:12px;display:flex;flex-direction:column;gap:6px;z-index:999;pointer-events:none;max-width:260px}
+.toast{background:var(--s3);border-radius:10px;padding:10px 14px;font-size:12px;animation:tIn .3s ease;box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:auto;border-left:3px solid var(--bd);display:flex;align-items:center;gap:8px}
+@keyframes tIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast.success{border-left-color:var(--gr);color:var(--gr)}
+.toast.error{border-left-color:var(--rd);color:var(--rd)}
 </style></head>
 <body>
-<div id="loginScreen" class="content" style="max-width:380px;margin:60px auto 0">
-  <div style="text-align:center;margin-bottom:26px">
-    <div class="logo" style="width:60px;height:60px;font-size:30px;margin:0 auto 14px">🤖</div>
-    <h2 style="margin:0">Bot Panel</h2>
-    <p style="color:#8b949e;font-size:13px;margin-top:4px">official-messenger-bot নিয়ন্ত্রণ কেন্দ্র</p>
-  </div>
+
+<div id="loginScreen">
+  <div class="bg"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div></div>
   <div class="card">
-    <input type="password" id="pwInput" placeholder="PANEL_PASSWORD দিন">
-    <button onclick="doLogin()" style="width:100%">🔓 লগইন করুন</button>
+    <div class="logo-lg">🤖</div>
+    <h1>Bot Panel</h1>
+    <p class="sub">official-messenger-bot কন্ট্রোল সেন্টার</p>
+    <div class="login-err" id="loginErr"></div>
+    <input type="password" id="pwInput" placeholder="🔐 পাসওয়ার্ড লিখুন" autofocus>
+    <button class="login-btn" onclick="doLogin()">প্রবেশ করুন →</button>
   </div>
 </div>
 
-<div id="app" class="hidden">
-  <header>
-    <div class="brand">
-      <div class="logo">🤖</div>
-      <div><h1>Bot Panel</h1><div class="sub">official-messenger-bot</div></div>
-    </div>
-    <span id="stateBadge" class="badge">...</span>
-  </header>
-  <div class="tabs">
-    <div class="tab active" data-tab="deploy" onclick="switchTab('deploy')">🚀 ডিপ্লয়</div>
-    <div class="tab" data-tab="files" onclick="switchTab('files')">📁 ফাইল</div>
-    <div class="tab" data-tab="logs" onclick="switchTab('logs')">📜 লগ</div>
-    <div class="tab" data-tab="status" onclick="switchTab('status')">📊 স্ট্যাটাস</div>
+<div id="app" style="display:none">
+  <div class="top">
+    <div class="top-logo" id="topLogo">🤖</div>
+    <div class="top-name">Bot Panel</div>
+    <span class="top-pill" id="stateBadge">...</span>
+    <div class="top-dot" id="topDot"></div>
   </div>
-  <div class="content">
 
-    <div id="tab-deploy">
-      <div class="card">
-        <h3>জিপ আপলোড</h3>
-        <p style="font-size:13px;color:#9198a1;margin-top:0">official-bot.zip আপলোড করুন (পুরনো bot/ ফোল্ডার মুছে নতুনটা বসবে):</p>
-        <input type="file" id="zipInput" accept=".zip">
-        <button onclick="uploadZip()" class="success">⬆️ আপলোড করুন</button>
-        <p id="uploadMsg" style="font-size:13px;color:#9198a1"></p>
+  <div class="main">
+
+    <div class="page active" id="pg-home">
+      <div class="pg-title">🏠 হোম</div>
+      <div class="sg">
+        <div class="sc"><div class="sc-i">🟢</div><div class="sc-v" id="hs-state">-</div><div class="sc-l">বট স্ট্যাটাস</div></div>
+        <div class="sc"><div class="sc-i">⏱️</div><div class="sc-v" id="hs-uptime">-</div><div class="sc-l">প্যানেল আপটাইম</div></div>
+        <div class="sc"><div class="sc-i">💾</div><div class="sc-v" id="hs-mem">-</div><div class="sc-l">মেমরি ব্যবহার</div></div>
+        <div class="sc"><div class="sc-i">📦</div><div class="sc-v" id="hs-project">-</div><div class="sc-l">প্রজেক্ট আপলোড</div></div>
       </div>
-      <div class="card">
+
+      <div class="bc">
+        <h3>জিপ ডিপ্লয়</h3>
+        <div class="upzone" onclick="document.getElementById('zipInput').click()">
+          <div class="uz-i">📦</div>
+          <div class="uz-t" id="uzText">official-bot.zip আপলোড করতে ট্যাপ করুন</div>
+          <div class="uz-s">পুরনো bot/ ফোল্ডার মুছে নতুনটা বসবে</div>
+        </div>
+        <input type="file" id="zipInput" accept=".zip" onchange="onZipPicked()">
+        <button class="btn b-install" style="width:100%" onclick="uploadZip()">⬆️ আপলোড করুন</button>
+      </div>
+
+      <div class="bc">
         <h3>কন্ট্রোল</h3>
-        <div class="row">
-          <button onclick="botAction('install-start')" class="success">📦 Install + Start</button>
-          <button onclick="botAction('start')">▶️ Start</button>
-          <button onclick="botAction('stop')" class="danger">⏹️ Stop</button>
-          <button onclick="botAction('restart')" class="secondary">🔄 Restart</button>
+        <div class="bg2">
+          <button class="btn b-install" onclick="botAction('install-start')">📦 Install+Start</button>
+          <button class="btn b-start" onclick="botAction('start')">▶️ Start</button>
+          <button class="btn b-stop" onclick="botAction('stop')">⏹️ Stop</button>
+          <button class="btn b-restart" onclick="botAction('restart')">🔄 Restart</button>
         </div>
       </div>
     </div>
 
-    <div id="tab-files" class="hidden">
-      <div class="card">
-        <h3>নতুন ফাইল যোগ করুন</h3>
-        <input type="text" id="newFilePath" placeholder="commands/mycommand.js">
-        <button onclick="createFile()" class="success" style="width:100%">➕ ফাইল তৈরি করুন</button>
+    <div class="page" id="pg-files">
+      <div class="pg-title">📁 ফাইল ম্যানেজার</div>
+      <div class="bc">
+        <input type="text" class="sinput" id="newFilePath" placeholder="commands/mycommand.js">
+        <button class="btn b-install" style="width:100%" onclick="createFile()">➕ নতুন ফাইল তৈরি করুন</button>
       </div>
       <div id="fileList"></div>
     </div>
 
-    <div id="tab-logs" class="hidden">
-      <button class="secondary" onclick="loadLogs()">🔄 রিফ্রেশ</button>
-      <div id="logView" style="margin-top:10px"></div>
-    </div>
-
-    <div id="tab-status" class="hidden">
-      <div class="status-grid" id="statusGrid"></div>
-      <p style="font-size:12px;color:#9198a1;margin-top:12px">UptimeRobot মনিটর URL হিসেবে এই ঠিকানা ব্যবহার করুন: <code>/ping</code></p>
-    </div>
-
-    <div id="editorView" class="hidden">
-      <div class="row">
-        <button class="secondary" onclick="closeEditor()">← ফিরে যান</button>
-        <button onclick="saveFile()">💾 সেভ করুন</button>
-        <button class="danger" onclick="deleteFile()">🗑️ ডিলিট</button>
+    <div class="page" id="pg-editor">
+      <div class="pg-title">✏️ এডিটর</div>
+      <div class="bg2" style="margin-bottom:10px">
+        <button class="btn b-ghost" onclick="closeEditor()">← ফিরে যান</button>
+        <button class="btn b-install" onclick="saveFile()">💾 সেভ</button>
       </div>
-      <p id="editorPath" style="font-family:monospace;font-size:13px;margin:10px 0 6px"></p>
-      <textarea id="editorContent"></textarea>
+      <div class="ed-top"><span class="ed-fn" id="editorPath"></span></div>
+      <textarea id="editorContent" spellcheck="false"></textarea>
+      <button class="btn b-stop" style="width:100%;margin-top:10px" onclick="deleteFile()">🗑️ এই ফাইল ডিলিট করুন</button>
+    </div>
+
+    <div class="page" id="pg-logs">
+      <div class="pg-title">📋 লাইভ লগ</div>
+      <button class="btn b-ghost" style="margin-bottom:10px" onclick="loadLogs()">🔄 রিফ্রেশ</button>
+      <div class="lbox" id="logView"></div>
+    </div>
+
+    <div class="page" id="pg-more">
+      <div class="pg-title">⚙️ আরো</div>
+      <div class="bc">
+        <h3>প্রয়োজনীয় লিংক</h3>
+        <p style="font-size:12.5px;color:var(--mu);line-height:1.8">UptimeRobot মনিটর URL: <code style="color:var(--bl)">/ping</code></p>
+      </div>
+      <div class="bc">
+        <h3>সেশন</h3>
+        <button class="btn b-stop" style="width:100%" onclick="logout()">🚪 লগআউট</button>
+      </div>
     </div>
 
   </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="home" onclick="goTab('home',this)"><span class="ti">🏠</span><span class="tl">হোম</span></button>
+    <button class="tab" data-tab="files" onclick="goTab('files',this)"><span class="ti">📁</span><span class="tl">ফাইল</span></button>
+    <button class="tab" data-tab="logs" onclick="goTab('logs',this)"><span class="ti">📋</span><span class="tl">লগ</span></button>
+    <button class="tab" data-tab="more" onclick="goTab('more',this)"><span class="ti">⚙️</span><span class="tl">আরো</span></button>
+  </div>
 </div>
+
+<div class="tw" id="tw"></div>
 
 <script>
 let TOKEN = localStorage.getItem("panelToken") || "";
 let currentFile = null;
+let pickedZip = null;
 let statusTimer = null;
+
+function toast(msg,type){
+  const w=document.getElementById("tw"),el=document.createElement("div");
+  const icons={success:"✅",error:"❌"};
+  el.className="toast "+(type||"success");
+  el.innerHTML="<span>"+(icons[type]||"ℹ️")+"</span><span>"+msg+"</span>";
+  w.appendChild(el);
+  setTimeout(()=>{el.style.opacity="0";el.style.transition=".3s";setTimeout(()=>el.remove(),300);},3500);
+}
 
 function api(p, opts = {}) {
   opts.headers = Object.assign({ "x-panel-token": TOKEN }, opts.headers || {});
   return fetch(p, opts).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "এরর"); return d; });
 }
 
-function doLogin() { TOKEN = document.getElementById("pwInput").value.trim(); localStorage.setItem("panelToken", TOKEN); boot(); }
+function doLogin(){
+  TOKEN = document.getElementById("pwInput").value.trim();
+  localStorage.setItem("panelToken", TOKEN);
+  boot();
+}
+function logout(){ localStorage.removeItem("panelToken"); location.reload(); }
 
 async function boot() {
   if (!TOKEN) return;
   try {
     await api("/api/status");
-    document.getElementById("loginScreen").classList.add("hidden");
-    document.getElementById("app").classList.remove("hidden");
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("app").style.display = "block";
     refreshBadge();
     statusTimer = setInterval(refreshBadge, 8000);
   } catch (e) {
-    document.getElementById("loginScreen").classList.remove("hidden");
-    document.getElementById("app").classList.add("hidden");
+    document.getElementById("loginScreen").style.display = "flex";
+    document.getElementById("app").style.display = "none";
+    const err=document.getElementById("loginErr");
+    if (TOKEN) { err.textContent = "❌ ভুল পাসওয়ার্ড"; err.classList.add("show"); }
   }
 }
 
-function switchTab(name) {
-  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
-  ["deploy","files","logs","status"].forEach(t => document.getElementById("tab-" + t).classList.toggle("hidden", t !== name));
-  closeEditor();
-  if (name === "files") loadFiles();
-  if (name === "logs") loadLogs();
-  if (name === "status") loadStatus();
+function goTab(id, btn) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  btn.classList.add("active");
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.getElementById("pg-" + id).classList.add("active");
+  if (id === "files") loadFiles();
+  if (id === "logs") loadLogs();
 }
 
 async function refreshBadge() {
   try {
     const s = await api("/api/status");
-    const b = document.getElementById("stateBadge");
-    b.textContent = s.botState;
-    b.className = "badge " + s.botState;
+    const badge = document.getElementById("stateBadge");
+    badge.textContent = s.botState;
+    document.getElementById("topLogo").className = "top-logo" + (s.botState === "running" ? " live" : "");
+    document.getElementById("topDot").className = "top-dot" + (s.botState === "running" ? " on" : "");
+    document.getElementById("hs-state").textContent = s.botState;
+    document.getElementById("hs-uptime").textContent = Math.floor(s.panelUptimeSec/60) + "m";
+    document.getElementById("hs-mem").textContent = s.memoryMB + " MB";
+    document.getElementById("hs-project").textContent = s.hasProject ? "✅" : "❌";
   } catch (e) {}
+}
+
+function onZipPicked(){
+  const f = document.getElementById("zipInput").files[0];
+  if (f) document.getElementById("uzText").textContent = "✅ " + f.name;
 }
 
 async function uploadZip() {
   const f = document.getElementById("zipInput").files[0];
-  if (!f) return alert("আগে একটা zip ফাইল বাছুন");
+  if (!f) return toast("আগে একটা zip ফাইল বাছুন","error");
   const fd = new FormData(); fd.append("zip", f);
-  document.getElementById("uploadMsg").textContent = "⏳ আপলোড হচ্ছে...";
+  toast("⏳ আপলোড হচ্ছে...");
   try {
     const r = await fetch("/api/upload?token=" + encodeURIComponent(TOKEN), { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
-    document.getElementById("uploadMsg").textContent = "✅ " + d.msg;
-  } catch (e) { document.getElementById("uploadMsg").textContent = "❌ " + e.message; }
+    toast(d.msg, "success");
+    refreshBadge();
+  } catch (e) { toast("❌ " + e.message, "error"); }
 }
 
 async function botAction(action) {
-  await api("/api/bot/" + action, { method: "POST" });
+  try {
+    await api("/api/bot/" + action, { method: "POST" });
+    toast("✅ কমান্ড পাঠানো হয়েছে: " + action);
+  } catch (e) { toast("❌ " + e.message, "error"); }
   setTimeout(refreshBadge, 1500);
 }
 
@@ -486,7 +616,6 @@ function fileIcon(p) {
   if (p.startsWith("utils/")) return "🧩";
   return "📄";
 }
-
 const FOLDER_LABELS = { "": "রুট ফাইল", commands: "⚡ কমান্ড", utils: "🧩 ইউটিলিটি" };
 
 async function loadFiles() {
@@ -495,8 +624,6 @@ async function loadFiles() {
     document.getElementById("fileList").innerHTML = "<div class='empty'>এখনো কোনো ফাইল আপলোড হয়নি</div>";
     return;
   }
-
-  // ফোল্ডার অনুযায়ী গ্রুপ করা: root ফাইল আগে, তারপর commands/, তারপর utils/
   const groups = {};
   for (const f of files) {
     const parts = f.path.split("/");
@@ -509,20 +636,19 @@ async function loadFiles() {
   document.getElementById("fileList").innerHTML = order.map((folder) => {
     const list = groups[folder].sort((a, b) => a.path.localeCompare(b.path));
     const rows = list.map(f => \`
-      <div class="file-row">
-        <span class="fname"><span class="ico">\${fileIcon(f.path)}</span><span class="nm">\${f.path.split("/").pop()}</span></span>
-        <button class="secondary" onclick="openFile('\${f.path}')">✏️ এডিট</button>
+      <div class="frow" onclick="openFile('\${f.path}')">
+        <span class="fi">\${fileIcon(f.path)}</span>
+        <span class="fn"><span class="fn-name">\${f.path.split("/").pop()}</span></span>
+        <button class="fab" onclick="event.stopPropagation();openFile('\${f.path}')">✏️</button>
       </div>\`).join("");
-    return \`<div class="folder-group">
-      <div class="folder-head">\${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span></div>
-      \${rows}
-    </div>\`;
+    return \`<div class="folder-head">\${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span></div>
+      <div class="flist">\${rows}</div>\`;
   }).join("");
 }
 
 async function createFile() {
   const p = document.getElementById("newFilePath").value.trim();
-  if (!p) return alert("ফাইলের পাথ দিন, যেমন commands/mycommand.js");
+  if (!p) return toast("ফাইলের পাথ দিন","error");
   const isJs = p.endsWith(".js");
   const template = isJs
     ? "\\"use strict\\";\\nmodule.exports = async function (senderId, args, { sendText }) {\\n  await sendText(senderId, 'হ্যালো! এটা একটা নতুন কমান্ড।');\\n};\\n"
@@ -531,8 +657,8 @@ async function createFile() {
     await api("/api/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p, content: template }) });
     document.getElementById("newFilePath").value = "";
     loadFiles();
-    alert("✅ ফাইল তৈরি হয়েছে — লিস্টে গিয়ে এডিট করুন");
-  } catch (e) { alert("❌ " + e.message); }
+    toast("✅ ফাইল তৈরি হয়েছে");
+  } catch (e) { toast("❌ " + e.message, "error"); }
 }
 
 async function openFile(p) {
@@ -540,44 +666,40 @@ async function openFile(p) {
   currentFile = p;
   document.getElementById("editorPath").textContent = p;
   document.getElementById("editorContent").value = content;
-  document.getElementById("editorView").classList.remove("hidden");
-  document.getElementById("tab-files").classList.add("hidden");
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".page").forEach(pg => pg.classList.remove("active"));
+  document.getElementById("pg-editor").classList.add("active");
 }
 
 function closeEditor() {
-  document.getElementById("editorView").classList.add("hidden");
-  const filesTab = document.querySelector('.tab[data-tab="files"]');
-  if (filesTab && filesTab.classList.contains("active")) document.getElementById("tab-files").classList.remove("hidden");
+  document.querySelectorAll(".tab")[1].classList.add("active"); // files tab
+  document.querySelectorAll(".page").forEach(pg => pg.classList.remove("active"));
+  document.getElementById("pg-files").classList.add("active");
   currentFile = null;
 }
 
 async function saveFile() {
   try {
     await api("/api/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: currentFile, content: document.getElementById("editorContent").value }) });
-    alert("✅ সেভ হয়েছে — বট চালু থাকলে Restart চাপুন কার্যকর করতে");
-  } catch (e) { alert("❌ " + e.message); }
+    toast("✅ সেভ হয়েছে");
+  } catch (e) { toast("❌ " + e.message, "error"); }
 }
 
 async function deleteFile() {
   if (!confirm("নিশ্চিত? " + currentFile + " ডিলিট হয়ে যাবে")) return;
-  await api("/api/file?path=" + encodeURIComponent(currentFile), { method: "DELETE" });
-  closeEditor(); loadFiles();
+  try {
+    await api("/api/file?path=" + encodeURIComponent(currentFile), { method: "DELETE" });
+    toast("🗑️ ডিলিট হয়েছে");
+    closeEditor(); loadFiles();
+  } catch (e) { toast("❌ " + e.message, "error"); }
 }
 
 async function loadLogs() {
   const { lines } = await api("/api/logs");
-  document.getElementById("logView").innerHTML = lines.slice().reverse().map(l =>
-    \`<div class="log-line \${l.level === 'error' ? 'log-error' : l.level === 'warn' ? 'log-warn' : ''}">[\${new Date(l.t).toLocaleTimeString('bn-BD')}] \${l.text}</div>\`
-  ).join("") || "<p>কোনো লগ নেই</p>";
-}
-
-async function loadStatus() {
-  const s = await api("/api/status");
-  document.getElementById("statusGrid").innerHTML = \`
-    <div class="status-box"><b>\${s.botState}</b><div class="lbl">বট স্ট্যাটাস</div></div>
-    <div class="status-box"><b>\${Math.floor(s.panelUptimeSec/60)}m</b><div class="lbl">প্যানেল আপটাইম</div></div>
-    <div class="status-box"><b>\${s.memoryMB} MB</b><div class="lbl">মেমরি</div></div>
-    <div class="status-box"><b>\${s.hasProject ? "✅" : "❌"}</b><div class="lbl">প্রজেক্ট আপলোড আছে</div></div>\`;
+  document.getElementById("logView").innerHTML = lines.slice().reverse().map(l => {
+    const cls = l.level === "error" ? "lr" : l.level === "warn" ? "lw" : "li";
+    return \`<div class="le \${cls}"><span class="lt">[\${new Date(l.t).toLocaleTimeString('bn-BD')}]</span>\${l.text}</div>\`;
+  }).join("") || "<div class='empty'>কোনো লগ নেই</div>";
 }
 
 boot();
