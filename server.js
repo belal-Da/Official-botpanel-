@@ -229,7 +229,10 @@ app.get("/api/files", auth, async (req, res) => {
     const result = [];
     for (const f of ROOT_EDITABLE_FILES) {
       const fp = path.join(BDIR, f);
-      if (await fs.pathExists(fp)) result.push({ path: f, size: (await fs.stat(fp)).size });
+      if (await fs.pathExists(fp)) {
+        const st = await fs.stat(fp);
+        result.push({ path: f, size: st.size, mtime: st.mtimeMs });
+      }
     }
     for (const dir of EDITABLE_SUBDIRS) {
       const dirPath = path.join(BDIR, dir);
@@ -237,7 +240,7 @@ app.get("/api/files", auth, async (req, res) => {
       for (const f of await fs.readdir(dirPath)) {
         if (!f.endsWith(".js")) continue;
         const stat = await fs.stat(path.join(dirPath, f));
-        result.push({ path: `${dir}/${f}`, size: stat.size });
+        result.push({ path: `${dir}/${f}`, size: stat.size, mtime: stat.mtimeMs });
       }
     }
     res.json({ files: result });
@@ -278,6 +281,48 @@ app.delete("/api/file", auth, async (req, res) => {
     pushLog("info", `🗑️ ফাইল ডিলিট হলো: ${relPath}`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── নাম পরিবর্তন ──
+app.post("/api/file/rename", auth, async (req, res) => {
+  try {
+    const { from, to } = req.body;
+    const fullFrom = safeResolve(from);
+    const fullTo = safeResolve(to);
+    if (!(await fs.pathExists(fullFrom))) throw new Error("সোর্স ফাইল পাওয়া যায়নি");
+    if (await fs.pathExists(fullTo)) throw new Error("এই নামে ইতিমধ্যে একটা ফাইল আছে");
+    await fs.move(fullFrom, fullTo);
+    const content = await fs.readFile(fullTo, "utf8");
+    mongoStore.deleteFile(from).catch(() => {});
+    if (to !== ".env") mongoStore.saveFile(to, content).catch(() => {});
+    pushLog("info", `🔤 নাম পরিবর্তন: ${from} → ${to}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── কপি/ডুপ্লিকেট ──
+app.post("/api/file/copy", auth, async (req, res) => {
+  try {
+    const { from, to } = req.body;
+    const fullFrom = safeResolve(from);
+    const fullTo = safeResolve(to);
+    if (!(await fs.pathExists(fullFrom))) throw new Error("সোর্স ফাইল পাওয়া যায়নি");
+    if (await fs.pathExists(fullTo)) throw new Error("এই নামে ইতিমধ্যে একটা ফাইল আছে");
+    await fs.copy(fullFrom, fullTo);
+    const content = await fs.readFile(fullTo, "utf8");
+    if (to !== ".env") mongoStore.saveFile(to, content).catch(() => {});
+    pushLog("info", `📋 কপি হলো: ${from} → ${to}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── ডাউনলোড ──
+app.get("/api/file/download", (req, res) => {
+  try {
+    if (req.query.token !== PASSWORD) return res.status(401).send("ভুল পাসওয়ার্ড");
+    const full = safeResolve(req.query.path);
+    res.download(full);
+  } catch (e) { res.status(400).send(e.message); }
 });
 
 // ──────────────────────────── UptimeRobot হেলথ-চেক ────────────────────────────
@@ -343,6 +388,13 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 .page{display:none}.page.active{display:block}
 .pg-title{font-size:15px;font-weight:800;color:#fff;margin:4px 0 12px}
 
+/* ── গ্রিটিং কার্ড (লাইভ ক্লক) ── */
+.greet-card{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,rgba(108,99,255,.15),rgba(255,101,132,.1));border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:14px}
+.greet-emoji{font-size:34px;animation:wave 2.4s ease-in-out infinite}
+@keyframes wave{0%,100%{transform:rotate(0)}25%{transform:rotate(14deg)}75%{transform:rotate(-8deg)}}
+.greet-text{font-size:14px;font-weight:800;color:#fff}
+.greet-clock{font-size:20px;font-weight:900;color:var(--ac);font-variant-numeric:tabular-nums;margin-top:2px;letter-spacing:.5px}
+
 /* ── স্ট্যাট কার্ড ── */
 .sg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 .sc{background:linear-gradient(135deg,var(--s2),var(--s3));border:1px solid var(--bd);border-radius:14px;padding:14px}
@@ -385,7 +437,10 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
 .fi{font-size:18px;flex-shrink:0;width:22px;text-align:center}
 .fn{flex:1;overflow:hidden}
 .fn-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.fab{padding:6px 10px;border-radius:8px;border:none;background:var(--s3);color:var(--mu);font-size:11px;cursor:pointer}
+.fn-meta{font-size:10px;color:var(--mu);margin-top:2px}
+.fa{display:flex;gap:4px;flex-shrink:0}
+.fab{padding:6px 9px;border-radius:8px;border:none;background:var(--s3);color:var(--mu);font-size:11px;cursor:pointer}
+.fab.del:active{background:rgba(240,82,82,.2);color:var(--rd)}
 .empty-fm{padding:36px 14px;text-align:center;color:var(--mu);font-size:13px}
 
 /* ── এডিটর ── */
@@ -435,6 +490,13 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
   <div class="main">
 
     <div class="page active" id="pg-home">
+      <div class="greet-card">
+        <div class="greet-emoji" id="greetEmoji">👋</div>
+        <div>
+          <div class="greet-text" id="greetText">স্বাগতম</div>
+          <div class="greet-clock" id="liveClock">--:--:--</div>
+        </div>
+      </div>
       <div class="pg-title">🏠 হোম</div>
       <div class="sg">
         <div class="sc"><div class="sc-i">🟢</div><div class="sc-v" id="hs-state">-</div><div class="sc-l">বট স্ট্যাটাস</div></div>
@@ -471,6 +533,7 @@ body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-
         <input type="text" class="sinput" id="newFilePath" placeholder="commands/mycommand.js">
         <button class="btn b-install" style="width:100%" onclick="createFile()">➕ নতুন ফাইল তৈরি করুন</button>
       </div>
+      <input type="text" class="sinput" id="fileSearch" placeholder="🔍 ফাইল খুঁজুন..." oninput="loadFiles()">
       <div id="fileList"></div>
     </div>
 
@@ -541,6 +604,24 @@ function doLogin(){
   boot();
 }
 function logout(){ localStorage.removeItem("panelToken"); location.reload(); }
+
+function updateClock() {
+  const now = new Date();
+  const el = document.getElementById("liveClock");
+  if (el) el.textContent = now.toLocaleTimeString("bn-BD", { hour12: true });
+
+  const h = now.getHours();
+  let emoji = "👋", text = "স্বাগতম";
+  if (h >= 5 && h < 12) { emoji = "☀️"; text = "শুভ সকাল"; }
+  else if (h >= 12 && h < 17) { emoji = "🌤️"; text = "শুভ দুপুর"; }
+  else if (h >= 17 && h < 20) { emoji = "🌇"; text = "শুভ সন্ধ্যা"; }
+  else { emoji = "🌙"; text = "শুভ রাত্রি"; }
+  const ge = document.getElementById("greetEmoji"), gt = document.getElementById("greetText");
+  if (ge) ge.textContent = emoji;
+  if (gt) gt.textContent = text;
+}
+setInterval(updateClock, 1000);
+updateClock();
 
 async function boot() {
   if (!TOKEN) return;
@@ -618,14 +699,34 @@ function fileIcon(p) {
 }
 const FOLDER_LABELS = { "": "রুট ফাইল", commands: "⚡ কমান্ড", utils: "🧩 ইউটিলিটি" };
 
+function fmtSize(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1024 / 1024).toFixed(1) + " MB";
+}
+function fmtAgo(ms) {
+  const diff = Date.now() - ms;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "এইমাত্র";
+  if (min < 60) return min + " মিনিট আগে";
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + " ঘণ্টা আগে";
+  return Math.floor(hr / 24) + " দিন আগে";
+}
+
+let _lastFiles = [];
 async function loadFiles() {
   const { files } = await api("/api/files");
-  if (!files.length) {
-    document.getElementById("fileList").innerHTML = "<div class='empty'>এখনো কোনো ফাইল আপলোড হয়নি</div>";
+  _lastFiles = files;
+  const q = (document.getElementById("fileSearch")?.value || "").trim().toLowerCase();
+  const filtered = q ? files.filter(f => f.path.toLowerCase().includes(q)) : files;
+
+  if (!filtered.length) {
+    document.getElementById("fileList").innerHTML = "<div class='empty'>" + (q ? "🔍 কিছু পাওয়া যায়নি" : "এখনো কোনো ফাইল আপলোড হয়নি") + "</div>";
     return;
   }
   const groups = {};
-  for (const f of files) {
+  for (const f of filtered) {
     const parts = f.path.split("/");
     const folder = parts.length > 1 ? parts[0] : "";
     (groups[folder] = groups[folder] || []).push(f);
@@ -638,12 +739,55 @@ async function loadFiles() {
     const rows = list.map(f => \`
       <div class="frow" onclick="openFile('\${f.path}')">
         <span class="fi">\${fileIcon(f.path)}</span>
-        <span class="fn"><span class="fn-name">\${f.path.split("/").pop()}</span></span>
-        <button class="fab" onclick="event.stopPropagation();openFile('\${f.path}')">✏️</button>
+        <span class="fn">
+          <span class="fn-name">\${f.path.split("/").pop()}</span>
+          <span class="fn-meta">\${fmtSize(f.size)} · \${f.mtime ? fmtAgo(f.mtime) : ""}</span>
+        </span>
+        <span class="fa">
+          <button class="fab" onclick="event.stopPropagation();openFile('\${f.path}')">✏️</button>
+          <button class="fab" onclick="event.stopPropagation();promptRename('\${f.path}')">🔤</button>
+          <button class="fab" onclick="event.stopPropagation();promptCopy('\${f.path}')">📋</button>
+          <button class="fab" onclick="event.stopPropagation();downloadFile('\${f.path}')">⬇️</button>
+          <button class="fab del" onclick="event.stopPropagation();quickDelete('\${f.path}')">🗑️</button>
+        </span>
       </div>\`).join("");
     return \`<div class="folder-head">\${FOLDER_LABELS[folder] || folder}<span class="count">\${list.length}</span></div>
       <div class="flist">\${rows}</div>\`;
   }).join("");
+}
+
+async function promptRename(p) {
+  const name = prompt("নতুন নাম দিন:", p.split("/").pop());
+  if (!name || name === p.split("/").pop()) return;
+  const dir = p.includes("/") ? p.split("/").slice(0, -1).join("/") : "";
+  const to = dir ? dir + "/" + name : name;
+  try {
+    await api("/api/file/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: p, to }) });
+    toast("✅ নাম পরিবর্তন হয়েছে"); loadFiles();
+  } catch (e) { toast("❌ " + e.message, "error"); }
+}
+
+async function promptCopy(p) {
+  const ext = p.includes(".") ? "." + p.split(".").pop() : "";
+  const base = ext ? p.slice(0, -ext.length) : p;
+  const to = prompt("কপি কোন নামে হবে?", base + "_copy" + ext);
+  if (!to) return;
+  try {
+    await api("/api/file/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: p, to }) });
+    toast("📋 কপি হয়েছে"); loadFiles();
+  } catch (e) { toast("❌ " + e.message, "error"); }
+}
+
+function downloadFile(p) {
+  window.open("/api/file/download?path=" + encodeURIComponent(p) + "&token=" + encodeURIComponent(TOKEN));
+}
+
+async function quickDelete(p) {
+  if (!confirm("\\"" + p + "\\" ডিলিট করবেন?")) return;
+  try {
+    await api("/api/file?path=" + encodeURIComponent(p), { method: "DELETE" });
+    toast("🗑️ ডিলিট হয়েছে"); loadFiles();
+  } catch (e) { toast("❌ " + e.message, "error"); }
 }
 
 async function createFile() {
