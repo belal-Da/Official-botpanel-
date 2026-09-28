@@ -79,6 +79,7 @@ pushLog("info", "🎛️ Panel চালু হলো");
 let botProc = null;
 let botState = "stopped"; // stopped | installing | starting | running | crashed
 let restartTimestamps = [];
+let intentionalStop = false; // ✅ ম্যানুয়াল স্টপ/রিস্টার্ট বনাম আসল ক্র্যাশ আলাদা করার জন্য
 
 function spawnLogged(cmd, args, opts, onDone) {
   const p = spawn(cmd, args, { cwd: BDIR, env: process.env, ...opts });
@@ -103,18 +104,33 @@ function npmInstallThenStart() {
 }
 
 function startBot() {
+  // ✅ ইতিমধ্যে একটা বট প্রসেস চলমান থাকলে দ্বিতীয়টা চালু করা যাবে না —
+  // এটাই আগে EADDRINUSE ক্র্যাশ-লুপের মূল কারণ ছিল (দুইটা প্রসেস একই পোর্টে বাইন্ড করার চেষ্টা)
+  if (botProc) {
+    pushLog("warn", "⚠️ বট ইতিমধ্যে চলছে — আবার চালু করা হলো না (আগে Stop করুন)");
+    return;
+  }
   const idx = path.join(BDIR, "index.js");
   if (!fs.existsSync(idx)) {
     pushLog("error", "❌ bot/index.js পাওয়া যায়নি — আগে জিপ আপলোড করুন");
     botState = "stopped";
     return;
   }
+  intentionalStop = false;
   botState = "starting";
   pushLog("info", "🚀 বট চালু হচ্ছে...");
   botProc = spawnLogged("node", ["index.js"], { env: { ...process.env, PORT: String(BOT_PORT) } }, (code) => {
-    botState = "stopped";
-    pushLog("error", `⚠️ বট বন্ধ হয়ে গেছে (exit ${code})`);
     botProc = null;
+    botState = "stopped";
+
+    // ✅ ইচ্ছাকৃতভাবে (Stop/Restart চেপে) বন্ধ করা হলে অটো-রিস্টার্ট করা হবে না
+    if (intentionalStop) {
+      pushLog("info", "⏹️ বট বন্ধ হয়েছে (ইচ্ছাকৃত)");
+      intentionalStop = false;
+      return;
+    }
+
+    pushLog("error", `⚠️ বট বন্ধ হয়ে গেছে (exit ${code})`);
 
     // ✅ ৩০ মিনিটে ৪ বারের বেশি অটো-রিস্টার্ট না — বারবার ক্র্যাশ-লুপ
     // (যেমন খারাপ কোড সেভ হয়ে থাকলে) সার্ভার overload করবে না
@@ -125,15 +141,20 @@ function startBot() {
       return;
     }
     restartTimestamps.push(now);
-    setTimeout(() => { if (botState === "stopped") startBot(); }, 5000);
+    setTimeout(() => { if (botState === "stopped" && !botProc) startBot(); }, 5000);
   });
   botState = "running";
 }
 
-function stopBot() {
+function stopBot(cb) {
   if (botProc) {
-    botProc.kill();
-    botProc = null;
+    intentionalStop = true; // ✅ পরের close ইভেন্টে বুঝবে এটা crash না, তাই আবার চালু করবে না
+    const p = botProc;
+    if (cb) p.once("close", () => cb()); // ✅ পুরনো প্রসেস আসলেই বন্ধ হওয়ার পরই cb (যেমন নতুন startBot) চলবে — রেস-কন্ডিশন এড়াতে
+    p.kill();
+  } else {
+    intentionalStop = false;
+    if (cb) setImmediate(cb);
   }
   botState = "stopped";
   pushLog("info", "⏹️ বট বন্ধ করা হলো");
@@ -224,17 +245,18 @@ app.post("/api/bot/install-start", auth, (req, res) => { npmInstallThenStart(); 
 // (ভাঙা/অসম্পূর্ণ প্যাকেজ — যেমন ERR_MODULE_NOT_FOUND — ঠিক করার সবচেয়ে নিশ্চিত উপায়) ──
 app.post("/api/bot/clean-install", auth, async (req, res) => {
   try {
-    stopBot();
-    await fs.remove(path.join(BDIR, "node_modules"));
-    await fs.remove(path.join(BDIR, "package-lock.json"));
-    pushLog("warn", "🧹 node_modules ও package-lock.json মুছে ফেলা হলো — ফ্রেশ ইনস্টল শুরু হচ্ছে");
-    npmInstallThenStart();
+    stopBot(async () => {
+      await fs.remove(path.join(BDIR, "node_modules"));
+      await fs.remove(path.join(BDIR, "package-lock.json"));
+      pushLog("warn", "🧹 node_modules ও package-lock.json মুছে ফেলা হলো — ফ্রেশ ইনস্টল শুরু হচ্ছে");
+      npmInstallThenStart();
+    });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post("/api/bot/start", auth, (req, res) => { startBot(); res.json({ ok: true }); });
 app.post("/api/bot/stop", auth, (req, res) => { stopBot(); res.json({ ok: true }); });
-app.post("/api/bot/restart", auth, (req, res) => { stopBot(); setTimeout(startBot, 1000); res.json({ ok: true }); });
+app.post("/api/bot/restart", auth, (req, res) => { stopBot(startBot); res.json({ ok: true }); });
 
 app.get("/api/status", auth, (req, res) => {
   res.json({
